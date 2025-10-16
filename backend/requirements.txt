@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+supabase
+openai
+google-generativeai
+python-dotenv
+requests
+beautifulsoup4
+feedparser
+pydantic
