@@ -1,9 +1,10 @@
 import os
-from html import escape
+from html import escape, unescape
 from typing import Tuple
 from dotenv import load_dotenv
 import google.generativeai as genai
 import openai
+from bs4 import BeautifulSoup
 
 # Load .env values so keys resolve during module import.
 load_dotenv()
@@ -19,11 +20,38 @@ if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 
 
+def _strip_markup(value: str) -> str:
+    if not value:
+        return ""
+    # BeautifulSoup gracefully handles HTML, XML, and plain text inputs.
+    soup = BeautifulSoup(value, "html.parser")
+    # Remove scripts/styles that can add noise.
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    cleaned = soup.get_text(separator=" ", strip=True)
+    return unescape(cleaned)
+
+
+def _sanitize_summary(value: str) -> str:
+    text = _strip_markup(value)
+    # Normalize multiple spaces/new lines into single line with explicit breaks.
+    normalized = " ".join(text.split())
+    # Preserve deliberate sentence separators by reintroducing newline before the CTA.
+    normalized = normalized.replace(" Why it matters:", "\nWhy it matters:")
+    normalized = normalized.replace(" WHY IT MATTERS:", "\nWhy it matters:")
+    return normalized.strip()
+
+
 def summarize_article(text: str) -> str:
+    cleaned_text = _strip_markup(text)
+    if not cleaned_text:
+        cleaned_text = (text or "").strip()
+
     prompt = (
-        "Summarize the following in 2-3 crisp sentences. "
-        "End with a 'Why it matters' line. Keep it factual, neutral, and scannable.\n\n"
-        f"{text}"
+        "Summarize the following article in plain English using 2-3 sentences. "
+        "End with a final sentence that starts with 'Why it matters:' explaining the impact. "
+        "Do not include markup, HTML tags, or bullet lists—just concise prose.\n\n"
+        f"{cleaned_text}"
     )
     # Try Gemini first
     try:
@@ -33,7 +61,7 @@ def summarize_article(text: str) -> str:
         resp = model.generate_content(prompt)
         content = resp.text or ""
         if content.strip():
-            return content.strip()
+            return _sanitize_summary(content)
         # Fall through to OpenAI if empty
     except Exception:
         pass
@@ -48,10 +76,10 @@ def summarize_article(text: str) -> str:
             max_tokens=250,
             temperature=0.3,
         )
-        return resp.choices[0].message["content"].strip()
+        return _sanitize_summary(resp.choices[0].message["content"])
     except Exception:
         # Last resort: truncate input
-        return (text or "")[:500]
+        return (cleaned_text or "")[:500]
 
 
 def render_newsletter(intro: str, items: list, trends: list) -> Tuple[str, str]:
@@ -70,9 +98,11 @@ def render_newsletter(intro: str, items: list, trends: list) -> Tuple[str, str]:
         text_lines.append("")
 
     for idx, it in enumerate(items, start=1):
-        title = it.get("title", f"Story {idx}")
+        raw_title = it.get("title", f"Story {idx}") or f"Story {idx}"
+        title = unescape(raw_title)
         url = it.get("url", "")
-        summary = (it.get("summary", "") or "").strip()
+        summary_raw = (it.get("summary", "") or "").strip()
+        summary = unescape(summary_raw)
 
         text_lines.append(f"{idx}. {title}")
         if url:
@@ -126,11 +156,16 @@ def render_newsletter(intro: str, items: list, trends: list) -> Tuple[str, str]:
     trends_section = ""
     if trends:
         text_lines.append("Trends to Watch")
-        for t in trends:
-            text_lines.append(f"- {t}")
+        for raw_t in trends:
+            if not raw_t:
+                continue
+            clean_t = unescape(raw_t)
+            text_lines.append(f"- {clean_t}")
         text_lines.append("")
         trend_items = "".join(
-            f'<li style="margin-bottom:8px;">{escape(t)}</li>' for t in trends
+            f'<li style="margin-bottom:8px;">{escape(unescape(t))}</li>'
+            for t in trends
+            if t
         )
         trends_section = (
             '<div style="margin-top:24px;">'
