@@ -1,6 +1,6 @@
 # CreatorPulse Frontend
 
-Minimal React + Vite dashboard for managing newsletter sources, generating AI summaries, previewing the HTML email, and triggering delivery.
+React + Vite dashboard that orchestrates the CreatorPulse pipeline: optional source intake, feed ingestion, top-ten curation, AI summarization, HTML preview, and approval to send the newsletter.
 
 ## Scripts
 ```bash
@@ -15,10 +15,11 @@ Set the API base in `.env.local` (defaults to `http://localhost:8000`):
 VITE_API_URL=http://localhost:8000
 ```
 
-## UI Overview
-- **Add Source** — Register a new RSS feed; the list updates immediately.
-- **Sources** — View existing feeds and trigger ingestion per source.
-- **Newsletter** — Generate an AI-produced HTML draft and review the exact markup before sending.
-- **Send Email** — Calls the FastAPI backend to rebuild the HTML + plain text email and deliver it via SMTP.
+## UI Flow
+1. **Pipeline controls** — Optionally provide a new RSS feed and choose whether to re-ingest existing sources.
+2. **Run pipeline** — The app calls `/newsletter/pipeline`, which ingests data, curates the top ten stories, and returns HTML + text drafts.
+3. **Story lineup** — Review the newsroom-style headlines, summaries, and source links for each curated article.
+4. **Preview draft** — Inspect the HTML email exactly as it will appear in clients.
+5. **Approve & send** — Trigger `/newsletter/send` to deliver the multi-part email via SMTP.
 
-All calls proxy to the FastAPI API defined by `VITE_API_URL`.
+All API calls target the FastAPI backend configured by `VITE_API_URL`.

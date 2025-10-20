@@ -1,10 +1,10 @@
 import os
 from html import escape, unescape
-from typing import Tuple
+from typing import Dict, Tuple
 from dotenv import load_dotenv
 import google.generativeai as genai
 import openai
-from bs4 import BeautifulSoup
+from app.core.content_utils import strip_markup
 
 # Load .env values so keys resolve during module import.
 load_dotenv()
@@ -20,20 +20,8 @@ if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 
 
-def _strip_markup(value: str) -> str:
-    if not value:
-        return ""
-    # BeautifulSoup gracefully handles HTML, XML, and plain text inputs.
-    soup = BeautifulSoup(value, "html.parser")
-    # Remove scripts/styles that can add noise.
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    cleaned = soup.get_text(separator=" ", strip=True)
-    return unescape(cleaned)
-
-
 def _sanitize_summary(value: str) -> str:
-    text = _strip_markup(value)
+    text = strip_markup(value)
     # Normalize multiple spaces/new lines into single line with explicit breaks.
     normalized = " ".join(text.split())
     # Preserve deliberate sentence separators by reintroducing newline before the CTA.
@@ -43,14 +31,14 @@ def _sanitize_summary(value: str) -> str:
 
 
 def summarize_article(text: str) -> str:
-    cleaned_text = _strip_markup(text)
+    cleaned_text = strip_markup(text)
     if not cleaned_text:
         cleaned_text = (text or "").strip()
 
     prompt = (
         "Summarize the following article in plain English using 2-3 sentences. "
         "End with a final sentence that starts with 'Why it matters:' explaining the impact. "
-        "Do not include markup, HTML tags, or bullet lists—just concise prose.\n\n"
+        "Do not include markup, HTML tags, or bullet lists; keep it concise prose.\n\n"
         f"{cleaned_text}"
     )
     # Try Gemini first
@@ -80,6 +68,78 @@ def summarize_article(text: str) -> str:
     except Exception:
         # Last resort: truncate input
         return (cleaned_text or "")[:500]
+
+
+def normalize_summary(value: str) -> str:
+    return _sanitize_summary(value)
+
+
+def _parse_headline_summary(raw: str, fallback_title: str) -> Dict[str, str]:
+    headline = fallback_title.strip() or "Untitled"
+    summary_chunks = []
+    for line in raw.splitlines():
+        parsed = line.strip()
+        lower = parsed.lower()
+        if lower.startswith("headline:"):
+            headline_candidate = parsed.split(":", 1)[1].strip()
+            if headline_candidate:
+                headline = headline_candidate
+        elif lower.startswith("summary:"):
+            summary_candidate = parsed.split(":", 1)[1].strip()
+            if summary_candidate:
+                summary_chunks.append(summary_candidate)
+        elif parsed:
+            summary_chunks.append(parsed)
+
+    summary_text = " ".join(summary_chunks) if summary_chunks else raw
+    summary = _sanitize_summary(summary_text)
+    return {"headline": headline, "summary": summary}
+
+
+def summarize_story(text: str, fallback_title: str) -> Dict[str, str]:
+    cleaned_text = strip_markup(text)
+    if not cleaned_text:
+        cleaned_text = (text or fallback_title or "").strip()
+
+    prompt = (
+        "You are a newsletter editor. Produce a concise, informative brief.\n"
+        "Respond with exactly two lines:\n"
+        "Headline: <A sharp news-style headline in Title Case, max 12 words>\n"
+        "Summary: <Two sentences of plain text ending with 'Why it matters:' insight>\n"
+        "Do not include HTML, bullets, or any additional commentary.\n\n"
+        f"{cleaned_text}"
+    )
+
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY not set")
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        resp = model.generate_content(prompt)
+        content = (resp.text or "").strip()
+        if content:
+            return _parse_headline_summary(content, fallback_title)
+    except Exception:
+        pass
+
+    try:
+        if not OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY not set")
+        resp = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=260,
+            temperature=0.3,
+        )
+        content = resp.choices[0].message["content"].strip()
+        if content:
+            return _parse_headline_summary(content, fallback_title)
+    except Exception:
+        pass
+
+    return {
+        "headline": fallback_title.strip() or "Untitled",
+        "summary": normalize_summary(cleaned_text[:500]),
+    }
 
 
 def render_newsletter(intro: str, items: list, trends: list) -> Tuple[str, str]:

@@ -16,3 +16,9 @@ class FeedbackIn(BaseModel):
 
 class NewsletterDraft(BaseModel):
     markdown: str
+
+
+class PipelineRequest(BaseModel):
+    source_name: Optional[str] = None
+    source_url: Optional[HttpUrl] = None
+    ingest_existing: bool = True

@@ -1,9 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.core.supabase_client import get_client
 from app.core.schemas import SourceIn
-import feedparser
-from datetime import datetime
-import time
+from app.core.ingestion import ingest_feed
 
 router = APIRouter()
 
@@ -33,40 +31,29 @@ def delete_source(url: str):
 def ingest_source(url: str):
     sb = get_client()
     # 1. Get source_id from URL
-    source_res = sb.table("sources").select("id").eq("url", url).limit(1).execute().data
+    source_res = (
+        sb.table("sources")
+        .select("id,url,name")
+        .eq("url", url)
+        .limit(1)
+        .execute()
+        .data
+    )
     if not source_res:
         raise HTTPException(status_code=404, detail="Source URL not found.")
-    source_id = source_res[0]['id']
+    source = source_res[0]
 
-    # 2. Fetch and parse feed
-    feed = feedparser.parse(url)
-    if feed.bozo:
-        print(f"Warning: Ill-formed feed at {url}. Reason: {feed.bozo_exception}")
+    inserted_count, processed_items = ingest_feed(sb, source)
 
-    # 3. Prepare items for insertion
-    items_to_insert = []
-    for entry in feed.entries:
-        # Convert published time to ISO 8601 format with timezone
-        published_time = datetime.now().isoformat()
-        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-            published_time = datetime.fromtimestamp(time.mktime(entry.published_parsed)).isoformat()
-
-        item = {
-            "source_id": source_id,
-            "title": entry.get("title", "No Title"),
-            "url": entry.get("link", ""),
-            "content": entry.get("content", [{}])[0].get("value", ""),
-            "summary": entry.get("summary", ""),
-            "published": published_time,
+    if not inserted_count:
+        return {
+            "status": "success",
+            "inserted": 0,
+            "message": "No new items found in feed.",
         }
-        # Skip items without a URL, as it's our unique key
-        if item["url"]:
-            items_to_insert.append(item)
 
-    if not items_to_insert:
-        return {"status": "success", "inserted": 0, "message": "No new items found in feed."}
-
-    # 4. Upsert items into DB, ignoring duplicates based on URL
-    res = sb.table("items").upsert(items_to_insert, on_conflict="url").execute()
-
-    return {"status": "success", "inserted": len(res.data)}
+    return {
+        "status": "success",
+        "inserted": inserted_count,
+        "processed": len(processed_items),
+    }

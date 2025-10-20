@@ -1,12 +1,13 @@
 # CreatorPulse
 
-CreatorPulse is a lightweight newsroom assistant that curates stories from your Supabase feeds, summarizes them with Gemini/OpenAI, and ships a polished HTML email via Gmail SMTP. The frontend pairs the workflow down to a single minimal dashboard so you can add sources, generate a draft, preview the exact email markup, and send it in a few clicks.
+CreatorPulse is a lightweight newsroom assistant that curates stories from your Supabase feeds, summarizes them with Gemini/OpenAI, and ships a polished HTML email via Gmail SMTP. The refreshed dashboard guides you through a pipeline that ingests data, curates the top ten stories, generates newsroom-style headlines and summaries, previews the HTML draft, and sends after approval.
 
 ## Features
 - **Source management** — Add RSS feeds, trigger ingestion, and review the active list backed by Supabase.
-- **AI summarization** — Generate concise bulletproof summaries with Gemini (preferred) or OpenAI as fallback.
+- **Automated pipeline** — Optional source input → ingest feeds → curate top ten stories → summarize with newsroom headlines → preview → approve & send.
+- **AI summarization** — Gemini (preferred) or OpenAI produce two-sentence briefs with a `Why it matters` line plus an editor-style headline.
 - **HTML email generation** — Render a responsive multi-part email (HTML + plain text) ready for modern mail clients.
-- **Minimal React UI** — One-page dashboard with draft preview, status messaging, and clean typography.
+- **Guided React UI** — One-page dashboard with pipeline status, story lineup, HTML preview, and approval controls.
 - **Automated delivery** — Optional GitHub Action (`.github/workflows/daily.yml`) to ping your deployed backend on a schedule.
 
 ## Tech Stack
@@ -53,9 +54,9 @@ npm run dev
 The dev server runs at http://localhost:5173. The dashboard automatically calls the FastAPI backend using `VITE_API_URL`.
 
 ## Sending the Newsletter
-1. **Load sources** — The app fetches existing feeds from Supabase. Use “Add source” to register new RSS URLs and “Ingest” to pull the latest items.
-2. **Generate draft** — Clicking “Generate draft” hits `/newsletter/generate`, returning HTML + text. The preview frame renders the HTML email exactly as recipients will see it.
-3. **Send email** — “Send email” posts to `/newsletter/send`, which rebuilds the email, wraps it in multipart MIME, and delivers via Gmail SMTP.
+1. **Run the pipeline** — Optionally supply a new RSS feed, choose whether to re-ingest existing sources, and trigger the automated flow. Behind the scenes the backend fetches feed entries, downloads article bodies, generates newsroom headlines and summaries, curates the top ten stories, and composes the HTML draft.
+2. **Review the lineup** — The UI lists each story with its headline, summary, and source link, and renders the exact HTML email preview.
+3. **Approve & send** — Click “Approve & Send” to fire `/newsletter/send`, which rebuilds the top-ten newsletter, wraps it in multipart MIME, and delivers via Gmail SMTP.
 
 ## Deployment
 - **Hugging Face Spaces**: Create a FastAPI Space, add the environment variables listed above, and deploy the backend. Point your frontend build (or Vite dev server) to the Space URL via `VITE_API_URL`.

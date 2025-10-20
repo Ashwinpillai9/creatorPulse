@@ -29,9 +29,16 @@ uvicorn app.main:app --reload --port 8000
 | `GET` | `/sources` | List sources from Supabase |
 | `POST` | `/sources` | Add a source (`name`, `url`, `type`) |
 | `DELETE` | `/sources?url=` | Remove a source |
-| `POST` | `/newsletter/generate` | Returns newsletter HTML + text preview |
+| `POST` | `/sources/ingest` | Fetch RSS feed, fetch full article pages, create summaries |
+| `POST` | `/newsletter/generate` | Returns curated top-ten HTML + text preview |
+| `POST` | `/newsletter/pipeline` | End-to-end pipeline (optional source → ingest → curate → summarize → preview) |
 | `POST` | `/newsletter/send` | Sends newsletter email (HTML + plain text) |
 | `POST` | `/feedback` | Store reader feedback payloads |
+
+### Ingestion Pipeline
+- Pulls RSS entries, skipping URLs that already exist for the source.
+- Fetches the full article HTML and strips markup to a clean text payload.
+- Generates a newsroom-style headline plus concise summary with Gemini (or OpenAI fallback) and stores it alongside the cleaned article content.
 
 ### Email Delivery
 `app/core/emailer.py` sends multipart MIME messages (plain + HTML) via Gmail SMTP on port 587. Swap in another SMTP host by adjusting the connection settings if needed.
