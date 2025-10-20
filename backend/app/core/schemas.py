@@ -22,3 +22,8 @@ class PipelineRequest(BaseModel):
     source_name: Optional[str] = None
     source_url: Optional[HttpUrl] = None
     ingest_existing: bool = True
+    source_ids: Optional[List[int]] = None
+
+
+class SendRequest(BaseModel):
+    source_ids: Optional[List[int]] = None

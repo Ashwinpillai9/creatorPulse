@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.core.emailer import send_email
 from app.core.ingestion import ingest_feed
@@ -10,7 +11,7 @@ from app.core.llm_utils import (
     render_newsletter,
     summarize_story,
 )
-from app.core.schemas import PipelineRequest
+from app.core.schemas import PipelineRequest, SendRequest
 from app.core.supabase_client import get_client
 
 router = APIRouter()
@@ -18,14 +19,13 @@ router = APIRouter()
 TOP_STORY_LIMIT = 10
 
 
-def _fetch_top_items(sb, limit: int = TOP_STORY_LIMIT) -> List[Dict]:
-    res = (
-        sb.table("items")
-        .select("*")
-        .order("published", desc=True)
-        .limit(limit)
-        .execute()
-    )
+def _fetch_top_items(
+    sb, limit: int = TOP_STORY_LIMIT, source_ids: Optional[List[int]] = None
+) -> List[Dict]:
+    query = sb.table("items").select("*")
+    if source_ids:
+        query = query.in_("source_id", source_ids)
+    res = query.order("published", desc=True).limit(limit).execute()
     return res.data or []
 
 
@@ -45,8 +45,10 @@ def _ensure_story_format(item: Dict) -> Dict:
     return item
 
 
-def _build_newsletter(sb) -> Dict:
-    items = _fetch_top_items(sb, TOP_STORY_LIMIT)
+def _build_newsletter(
+    sb, source_ids: Optional[List[int]] = None, limit: int = TOP_STORY_LIMIT
+) -> Dict:
+    items = _fetch_top_items(sb, limit, source_ids)
     if not items:
         raise HTTPException(
             status_code=404,
@@ -68,9 +70,11 @@ def _build_newsletter(sb) -> Dict:
 
 
 @router.post("/generate")
-def generate_newsletter():
+def generate_newsletter(
+    source_ids: Optional[List[int]] = Body(default=None, embed=True)
+):
     sb = get_client()
-    newsletter = _build_newsletter(sb)
+    newsletter = _build_newsletter(sb, source_ids)
     return {
         "html": newsletter["html"],
         "text": newsletter["text"],
@@ -85,62 +89,151 @@ def generate_newsletter():
 def run_pipeline(payload: PipelineRequest):
     sb = get_client()
     steps = []
+    current_stage = "source"
+    selected_ids: Optional[Set[int]] = (
+        set(payload.source_ids) if payload and payload.source_ids else None
+    )
 
-    # Optional: add a new source supplied by the user.
-    if payload.source_url:
-        existing = (
-            sb.table("sources")
-            .select("id")
-            .eq("url", str(payload.source_url))
-            .limit(1)
-            .execute()
-            .data
-        )
-        if not existing:
-            sb.table("sources").insert(
-                {
-                    "name": payload.source_name or str(payload.source_url),
-                    "url": str(payload.source_url),
-                    "type": "rss",
-                }
-            ).execute()
-            steps.append({"stage": "source", "status": "added"})
+    try:
+        # Optional: add a new source supplied by the user.
+        if payload.source_url:
+            existing = (
+                sb.table("sources")
+                .select("id")
+                .eq("url", str(payload.source_url))
+                .limit(1)
+                .execute()
+                .data
+            )
+            if not existing:
+                insert_res = (
+                    sb.table("sources")
+                    .insert(
+                        {
+                            "name": payload.source_name or str(payload.source_url),
+                            "url": str(payload.source_url),
+                            "type": "rss",
+                        }
+                    )
+                    .execute()
+                )
+                new_id = insert_res.data[0]["id"]
+                if selected_ids is not None:
+                    selected_ids.add(new_id)
+                steps.append(
+                    {
+                        "stage": "source",
+                        "status": "completed",
+                        "action": "added",
+                        "source_id": new_id,
+                    }
+                )
+            else:
+                if selected_ids is not None:
+                    selected_ids.add(existing[0]["id"])
+                steps.append(
+                    {"stage": "source", "status": "completed", "action": "existing"}
+                )
         else:
-            steps.append({"stage": "source", "status": "existing"})
-    else:
-        steps.append({"stage": "source", "status": "skipped"})
+            steps.append({"stage": "source", "status": "skipped"})
 
-    # Fetch data (ingest feeds)
-    total_inserted = 0
-    if payload.ingest_existing:
-        sources = sb.table("sources").select("id,url,name").execute().data or []
-        for source in sources:
-            inserted, _ = ingest_feed(sb, source)
-            total_inserted += inserted
-        steps.append({"stage": "fetch", "status": "completed", "inserted": total_inserted})
-    else:
-        steps.append({"stage": "fetch", "status": "skipped"})
+        # Resolve which sources to use for the rest of the pipeline.
+        source_query = sb.table("sources").select("id,url,name")
+        if selected_ids:
+            source_query = source_query.in_("id", list(selected_ids))
+        source_records = source_query.execute().data or []
+        if not source_records:
+            steps.append(
+                {
+                    "stage": "source",
+                    "status": "error",
+                    "message": "No sources available. Select or add at least one.",
+                }
+            )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "No sources selected. Add or select at least one source.",
+                    "steps": steps,
+                },
+            )
 
-    # Curate & summarize top 10 stories
-    newsletter = _build_newsletter(sb)
-    steps.append({"stage": "curate", "status": "completed", "stories": len(newsletter["items"])})
-    steps.append({"stage": "summarize", "status": "completed"})
+        used_source_ids = [row["id"] for row in source_records]
+        if selected_ids is None:
+            selected_ids = set(used_source_ids)
 
-    return {
-        "steps": steps,
-        "html": newsletter["html"],
-        "text": newsletter["text"],
-        "stories": [
-            {"title": item["title"], "summary": item["summary"], "url": item["url"]}
-            for item in newsletter["items"]
-        ],
-    }
+        # Fetch data (ingest feeds)
+        current_stage = "fetch"
+        total_inserted = 0
+        if payload.ingest_existing:
+            for source in source_records:
+                inserted, _ = ingest_feed(sb, source)
+                total_inserted += inserted
+            steps.append(
+                {
+                    "stage": "fetch",
+                    "status": "completed",
+                    "inserted": total_inserted,
+                }
+            )
+        else:
+            steps.append({"stage": "fetch", "status": "skipped"})
+
+        # Curate & summarize top 10 stories
+        current_stage = "curate"
+        newsletter = _build_newsletter(sb, used_source_ids)
+        steps.append(
+            {
+                "stage": "curate",
+                "status": "completed",
+                "stories": len(newsletter["items"]),
+            }
+        )
+        steps.append({"stage": "summarize", "status": "completed"})
+        steps.append(
+            {
+                "stage": "preview",
+                "status": "completed" if newsletter["html"] else "pending",
+            }
+        )
+
+        return {
+            "steps": steps,
+            "html": newsletter["html"],
+            "text": newsletter["text"],
+            "stories": [
+                {
+                    "title": item["title"],
+                    "summary": item["summary"],
+                    "url": item["url"],
+                }
+                for item in newsletter["items"]
+            ],
+            "used_source_ids": used_source_ids,
+        }
+    except HTTPException as exc:
+        steps.append(
+            {"stage": current_stage, "status": "error", "message": exc.detail}
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.detail, "steps": steps},
+        )
+    except Exception as exc:
+        steps.append(
+            {"stage": current_stage, "status": "error", "message": str(exc)}
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Pipeline failed.", "steps": steps},
+        )
 
 
 @router.post("/send")
-def send_newsletter():
+def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
     sb = get_client()
-    newsletter = _build_newsletter(sb)
+    source_ids = payload.source_ids if payload else None
+    newsletter = _build_newsletter(sb, source_ids)
     subject = f"CreatorPulse Daily - {datetime.utcnow().date()}"
     send_email(subject, newsletter["html"], newsletter["text"])
 
