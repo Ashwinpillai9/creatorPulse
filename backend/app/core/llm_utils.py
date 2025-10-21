@@ -1,23 +1,30 @@
+import logging
 import os
 from html import escape, unescape
 from typing import Dict, Tuple
-from dotenv import load_dotenv
+
 import google.generativeai as genai
-import openai
+from openai import OpenAI
+from dotenv import load_dotenv
+
 from app.core.content_utils import strip_markup
 
 # Load .env values so keys resolve during module import.
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # Configure Gemini (default)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("Configured Gemini client with model '%s'", GEMINI_MODEL)
 
 # Configure OpenAI (fallback)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
+    logger.info("Configured OpenAI client")
 
 
 def _sanitize_summary(value: str) -> str:
@@ -45,28 +52,31 @@ def summarize_article(text: str) -> str:
     try:
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY not set")
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        logger.debug("Summarising article with Gemini (length=%d)", len(cleaned_text))
+        model = genai.GenerativeModel(GEMINI_MODEL)
         resp = model.generate_content(prompt)
         content = resp.text or ""
         if content.strip():
             return _sanitize_summary(content)
-        # Fall through to OpenAI if empty
+        logger.info("Gemini returned empty summary, falling back to OpenAI")
     except Exception:
-        pass
+        logger.exception("Gemini summarisation failed - falling back to OpenAI")
 
     # Fallback: OpenAI
     try:
-        if not OPENAI_API_KEY:
+        if not openai_client:
             raise RuntimeError("OPENAI_API_KEY not set")
-        resp = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+        logger.debug("Summarising article with OpenAI (length=%d)", len(cleaned_text))
+        resp = openai_client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[{"role": "user", "content": prompt}],
             max_tokens=250,
             temperature=0.3,
         )
-        return _sanitize_summary(resp.choices[0].message["content"])
+        return _sanitize_summary(resp.choices[0].message.content)
     except Exception:
         # Last resort: truncate input
+        logger.exception("OpenAI summarisation failed; returning truncated text")
         return (cleaned_text or "")[:500]
 
 
@@ -136,28 +146,39 @@ def summarize_story(text: str, fallback_title: str) -> Dict[str, str]:
     try:
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY not set")
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        logger.debug(
+            "Summarising story with Gemini (title=%s, length=%d)",
+            fallback_title,
+            len(cleaned_text),
+        )
+        model = genai.GenerativeModel(GEMINI_MODEL)
         resp = model.generate_content(prompt)
         content = (resp.text or "").strip()
         if content:
             return _parse_headline_summary(content, fallback_title)
+        logger.info("Gemini returned empty story summary for %s", fallback_title)
     except Exception:
-        pass
+        logger.exception("Gemini failed to summarise story %s", fallback_title)
 
     try:
-        if not OPENAI_API_KEY:
+        if not openai_client:
             raise RuntimeError("OPENAI_API_KEY not set")
-        resp = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+        logger.debug(
+            "Summarising story with OpenAI (title=%s, length=%d)",
+            fallback_title,
+            len(cleaned_text),
+        )
+        resp = openai_client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[{"role": "user", "content": prompt}],
             max_tokens=260,
             temperature=0.3,
         )
-        content = resp.choices[0].message["content"].strip()
+        content = resp.choices[0].message.content.strip()
         if content:
             return _parse_headline_summary(content, fallback_title)
     except Exception:
-        pass
+        logger.exception("OpenAI failed to summarise story %s", fallback_title)
 
     return {
         "headline": fallback_title.strip() or "Untitled",
@@ -168,6 +189,11 @@ def summarize_story(text: str, fallback_title: str) -> Dict[str, str]:
 def render_newsletter(intro: str, items: list, trends: list) -> Tuple[str, str]:
     intro_text = (intro or "").strip()
     intro_html = escape(intro_text).replace("\n", "<br>")
+    logger.debug(
+        "Rendering newsletter with %d item(s) and intro length %d",
+        len(items),
+        len(intro_text),
+    )
 
     text_lines = ["CreatorPulse Daily", ""]
     if intro_text:

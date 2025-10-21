@@ -1,10 +1,11 @@
 fastapi
 uvicorn
 supabase
-openai
+openai>=1.0.0
 google-generativeai
 python-dotenv
 requests
 beautifulsoup4
 feedparser
 pydantic
+

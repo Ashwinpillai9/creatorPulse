@@ -1,12 +1,16 @@
+import logging
 import os
-from typing import Optional
-from dotenv import load_dotenv
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Optional
+
+from dotenv import load_dotenv
 
 # Ensure SMTP credentials come from .env when running locally.
 load_dotenv()
+logger = logging.getLogger(__name__)
+
 
 def send_email(subject: str, html_body: str, text_body: Optional[str] = None):
     sender = os.getenv("EMAIL_FROM")
@@ -14,6 +18,7 @@ def send_email(subject: str, html_body: str, text_body: Optional[str] = None):
     password = os.getenv("SMTP_PASS")
 
     if not all([sender, user, password]):
+        logger.error("Missing SMTP configuration; aborting email send")
         raise RuntimeError("EMAIL_FROM / SMTP_USER / SMTP_PASS are required.")
 
     msg = MIMEMultipart("alternative")
@@ -31,7 +36,9 @@ def send_email(subject: str, html_body: str, text_body: Optional[str] = None):
     msg.attach(plain_part)
     msg.attach(html_part)
 
+    logger.debug("Connecting to SMTP server as %s", user)
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.starttls()
         server.login(user, password)
+        logger.info("Sending email '%s' to %s", subject, sender)
         server.sendmail(sender, [sender], msg.as_string())

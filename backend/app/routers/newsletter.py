@@ -1,23 +1,25 @@
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 
 from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from app.core.content_utils import strip_markup
 from app.core.emailer import send_email
 from app.core.ingestion import ingest_feed
 from app.core.llm_utils import (
+    fallback_summary,
     normalize_summary,
     render_newsletter,
     summarize_story,
     summary_is_informative,
-    fallback_summary,
 )
 from app.core.schemas import PipelineRequest, SendRequest
 from app.core.supabase_client import get_client
-from app.core.content_utils import strip_markup
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 TOP_STORY_LIMIT = 10
 
@@ -99,6 +101,7 @@ def generate_newsletter(
     source_ids: Optional[List[int]] = Body(default=None, embed=True)
 ):
     sb = get_client()
+    logger.info("Generating newsletter (source_ids=%s)", source_ids)
     newsletter = _build_newsletter(sb, source_ids)
     return {
         "html": newsletter["html"],
@@ -117,6 +120,13 @@ def run_pipeline(payload: PipelineRequest):
     current_stage = "source"
     selected_ids: Optional[Set[int]] = (
         set(payload.source_ids) if payload and payload.source_ids else None
+    )
+
+    logger.info(
+        "Pipeline requested (source_url=%s, ingest_existing=%s, source_ids=%s)",
+        payload.source_url,
+        payload.ingest_existing,
+        payload.source_ids,
     )
 
     try:
@@ -222,7 +232,7 @@ def run_pipeline(payload: PipelineRequest):
             }
         )
 
-        return {
+        response = {
             "steps": steps,
             "html": newsletter["html"],
             "text": newsletter["text"],
@@ -236,7 +246,14 @@ def run_pipeline(payload: PipelineRequest):
             ],
             "used_source_ids": used_source_ids,
         }
+        logger.info("Pipeline completed successfully")
+        return response
     except HTTPException as exc:
+        logger.warning(
+            "Pipeline aborted with HTTPException at stage %s: %s",
+            current_stage,
+            exc.detail,
+        )
         steps.append(
             {"stage": current_stage, "status": "error", "message": exc.detail}
         )
@@ -245,6 +262,7 @@ def run_pipeline(payload: PipelineRequest):
             content={"error": exc.detail, "steps": steps},
         )
     except Exception as exc:
+        logger.exception("Pipeline failed at stage %s: %s", current_stage, exc)
         steps.append(
             {"stage": current_stage, "status": "error", "message": str(exc)}
         )
@@ -260,6 +278,13 @@ def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
     source_ids = payload.source_ids if payload else None
     html_override = payload.html if payload and payload.html else None
     text_override = payload.text if payload and payload.text else None
+
+    logger.info(
+        "Send requested (source_ids=%s, html_override=%s, text_override=%s)",
+        source_ids,
+        bool(html_override),
+        bool(text_override),
+    )
 
     newsletter = None
     if html_override is None or text_override is None or source_ids:
@@ -286,6 +311,7 @@ def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
         text_body = strip_markup(html_body)
 
     subject = f"CreatorPulse Daily - {datetime.utcnow().date()}"
+    logger.info("Dispatching newsletter email with subject '%s'", subject)
     send_email(subject, html_body, text_body)
 
     try:
@@ -293,6 +319,6 @@ def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
             {"run_date": datetime.utcnow().isoformat(), "status": "sent"}
         ).execute()
     except Exception:
-        pass
+        logger.warning("Failed to record send event in history table", exc_info=True)
 
     return {"status": "sent", "subject": subject}

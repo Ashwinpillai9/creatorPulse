@@ -39,12 +39,19 @@ uvicorn app.main:app --reload --port 8000
 | --- | --- |
 | `SUPABASE_URL` | Supabase project REST endpoint |
 | `SUPABASE_KEY` | Service role key for Supabase |
-| `GEMINI_API_KEY` | (Optional) Used for primary summarization model |
-| `OPENAI_API_KEY` | (Optional) Fallback summarization model |
+| `GEMINI_API_KEY` | (Optional) Used for primary summarisation model |
+| `GEMINI_MODEL` | (Optional) Gemini model identifier (defaults to `models/gemini-1.5-flash-latest`) |
+| `OPENAI_API_KEY` | (Optional) Fallback summarisation model |
+| `OPENAI_MODEL` | (Optional) OpenAI model name (defaults to `gpt-4o-mini`) |
 | `EMAIL_FROM` | From address for outbound email |
 | `SMTP_USER` / `SMTP_PASS` | Credentials for the SMTP account |
 | `ALLOWED_ORIGINS` | Comma-separated list of frontend origins (defaults to `*`) |
 | `ALLOW_CREDENTIALS` | Set to `true` if you need cookies/bearer auth when `ALLOWED_ORIGINS` is not `*` |
+| `LOG_LEVEL` / `LOG_FORMAT` | Optional overrides for backend logging |
+<<<<<<< HEAD
+=======
+| `LOG_LEVEL` / `LOG_FORMAT` | Optional overrides for backend logging |
+>>>>>>> 5cb8f1e (refactor: tighten llm fallbacks and logging)
 
 ## Frontend Setup
 ```bash
