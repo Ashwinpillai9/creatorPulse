@@ -11,33 +11,36 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+
 
 def send_email(subject: str, html_body: str, text_body: Optional[str] = None):
-    sender = os.getenv("EMAIL_FROM")
-    user = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASS")
+    sender = os.getenv('EMAIL_FROM')
+    user = os.getenv('SMTP_USER')
+    password = os.getenv('SMTP_PASS')
 
     if not all([sender, user, password]):
-        logger.error("Missing SMTP configuration; aborting email send")
-        raise RuntimeError("EMAIL_FROM / SMTP_USER / SMTP_PASS are required.")
+        logger.error('Missing SMTP configuration; aborting email send')
+        raise RuntimeError('EMAIL_FROM / SMTP_USER / SMTP_PASS are required.')
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = sender
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = sender
 
-    plain_part = MIMEText((text_body or "").strip(), "plain", "utf-8")
+    plain_part = MIMEText((text_body or '').strip(), 'plain', 'utf-8')
     full_html = (
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"></head>"
-        f"<body>{html_body}</body></html>"
+        '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"></head>'
+        f'<body>{html_body}</body></html>'
     )
-    html_part = MIMEText(full_html, "html", "utf-8")
+    html_part = MIMEText(full_html, 'html', 'utf-8')
 
     msg.attach(plain_part)
     msg.attach(html_part)
 
-    logger.debug("Connecting to SMTP server as %s", user)
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    logger.debug('Connecting to SMTP server %s:%s as %s', SMTP_HOST, SMTP_PORT, user)
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
         server.starttls()
         server.login(user, password)
         logger.info("Sending email '%s' to %s", subject, sender)
