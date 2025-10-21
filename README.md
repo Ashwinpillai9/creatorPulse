@@ -45,6 +45,10 @@ uvicorn app.main:app --reload --port 8000
 | `OPENAI_MODEL` | (Optional) OpenAI model name (defaults to `gpt-4o-mini`) |
 | `EMAIL_FROM` | From address for outbound email |
 | `SMTP_USER` / `SMTP_PASS` | Credentials for the SMTP account |
+| `EMAIL_PROVIDER` | `smtp` (default) or `sendgrid` |
+| `SMTP_HOST` / `SMTP_PORT` | SMTP host/port (defaults `smtp.gmail.com` / `587`) |
+| `SENDGRID_API_KEY` | Required when `EMAIL_PROVIDER=sendgrid` |
+| `EMAIL_TO` | Optional recipient override (defaults to `EMAIL_FROM`) |
 | `ALLOWED_ORIGINS` | Comma-separated list of frontend origins (defaults to `*`) |
 | `ALLOW_CREDENTIALS` | Set to `true` if you need cookies/bearer auth when `ALLOWED_ORIGINS` is not `*` |
 | `LOG_LEVEL` / `LOG_FORMAT` | Optional overrides for backend logging |
