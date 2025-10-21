@@ -43,6 +43,8 @@ uvicorn app.main:app --reload --port 8000
 | `OPENAI_API_KEY` | (Optional) Fallback summarization model |
 | `EMAIL_FROM` | From address for outbound email |
 | `SMTP_USER` / `SMTP_PASS` | Credentials for the SMTP account |
+| `ALLOWED_ORIGINS` | Comma-separated list of frontend origins (defaults to `*`) |
+| `ALLOW_CREDENTIALS` | Set to `true` if you need cookies/bearer auth when `ALLOWED_ORIGINS` is not `*` |
 
 ## Frontend Setup
 ```bash
@@ -60,8 +62,51 @@ The dev server runs at http://localhost:5173. The dashboard automatically calls 
 3. **Approve & send** - Click 'Approve & Send' to post to /newsletter/send, which wraps the content in multipart MIME and delivers it via Gmail SMTP.
 
 ## Deployment
-- **Hugging Face Spaces**: Create a FastAPI Space, add the environment variables listed above, and deploy the backend. Point your frontend build (or Vite dev server) to the Space URL via `VITE_API_URL`.
-- **Static frontend hosting**: Build with `npm run build` and serve the `frontend/dist` folder on any static host, configured with the same API base URL.
+
+### Backend (Docker)
+The repo ships with a `Dockerfile` that serves the FastAPI app with Uvicorn.
+
+```bash
+docker build -t creatorpulse-backend .
+docker run -p 7860:7860 \
+  -e SUPABASE_URL=... \
+  -e SUPABASE_KEY=... \
+  -e EMAIL_FROM=... \
+  -e SMTP_USER=... \
+  -e SMTP_PASS=... \
+  -e GEMINI_API_KEY=... \
+  -e OPENAI_API_KEY=... \
+  -e ALLOWED_ORIGINS=https://your-frontend.app \
+  creatorpulse-backend
+```
+
+The container listens on `$PORT` (default `7860`). Adjust `ALLOWED_ORIGINS` to the exact frontend domain; leave it blank to allow all origins during local testing (credentials will automatically be disabled when `*` is used).
+
+#### Hugging Face Spaces
+1. Create a **Docker** Space with the *Blank* template.
+2. Upload the repository (or the `backup` folder that includes the `Dockerfile`).
+3. Add secrets in the Space settings for the environment variables above.
+4. After the build completes, verify `https://<space>.hf.space/health` returns a 200 response.
+
+#### Render / Railway / Fly.io
+Use the same container or configure a Python build step:
+
+- Install command: `pip install -r backend/requirements.txt`
+- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+### Frontend (Static hosting)
+1. Set `VITE_API_URL` to the deployed backend URL.
+2. Build the React app:
+   ```bash
+   cd frontend
+   npm ci
+   npm run build
+   ```
+3. Deploy `frontend/dist` to any static host:
+   - **Vercel / Netlify**: import the project, set the `VITE_API_URL` env variable, and use `npm run build`.
+   - **Hugging Face Spaces**: Create a *Static → React* Space, upload the `frontend/` directory, and set `VITE_API_URL` in the Space variables.
+
+Once both services are live, update `ALLOWED_ORIGINS` (backend) and `VITE_API_URL` (frontend) so they point to each other.
 
 ## Automation
 `./.github/workflows/daily.yml` contains a scheduled GitHub Action that can hit your deployed backend each morning. Update the webhook URL to your hosted FastAPI endpoint and enable the workflow to keep newsletters flowing automatically.
