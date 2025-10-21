@@ -93,13 +93,18 @@ def _send_via_sendgrid(
         )
 
 
-def send_email(subject: str, html_body: str, text_body: Optional[str] = None):
+def send_email(
+    subject: str,
+    html_body: str,
+    text_body: Optional[str] = None,
+    recipient: Optional[str] = None,
+):
     sender = os.getenv("EMAIL_FROM")
     if not sender:
         logger.error("EMAIL_FROM missing; aborting email send")
         raise RuntimeError("EMAIL_FROM is required.")
 
-    recipient = DEFAULT_RECIPIENT or sender
+    recipient = recipient or DEFAULT_RECIPIENT or sender
     plain_text = (text_body or "").strip()
     full_html = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"></head>'

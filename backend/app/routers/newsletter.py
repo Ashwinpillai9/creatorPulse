@@ -280,10 +280,11 @@ def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
     text_override = payload.text if payload and payload.text else None
 
     logger.info(
-        "Send requested (source_ids=%s, html_override=%s, text_override=%s)",
+        "Send requested (source_ids=%s, html_override=%s, text_override=%s, email=%s)",
         source_ids,
         bool(html_override),
         bool(text_override),
+        payload.email_to if payload else None,
     )
 
     newsletter = None
@@ -311,8 +312,13 @@ def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
         text_body = strip_markup(html_body)
 
     subject = f"CreatorPulse Daily - {datetime.utcnow().date()}"
-    logger.info("Dispatching newsletter email with subject '%s'", subject)
-    send_email(subject, html_body, text_body)
+    email_to = payload.email_to if payload and payload.email_to else None
+    logger.info(
+        "Dispatching newsletter email with subject '%s' (recipient=%s)",
+        subject,
+        email_to or "default",
+    )
+    send_email(subject, html_body, text_body, recipient=email_to)
 
     try:
         sb.table("history").insert(

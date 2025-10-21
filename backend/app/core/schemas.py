@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, EmailStr
 from typing import Optional, List
 
 class SourceIn(BaseModel):
@@ -29,3 +29,4 @@ class SendRequest(BaseModel):
     source_ids: Optional[List[int]] = None
     html: Optional[str] = None
     text: Optional[str] = None
+    email_to: Optional[EmailStr] = None

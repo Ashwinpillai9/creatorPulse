@@ -322,6 +322,7 @@ function App() {
   const [editedHtml, setEditedHtml] = useState("");
   const [editedText, setEditedText] = useState("");
   const [previewMode, setPreviewMode] = useState("preview");
+  const [recipientEmail, setRecipientEmail] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
@@ -502,6 +503,7 @@ function App() {
         source_ids: selectedSourceIds,
         html: editedHtml || draftHtml,
         text: editedText || draftText,
+        email_to: recipientEmail.trim() || undefined,
       });
       setPipelineSteps((prev) =>
         prev.map((step) =>
@@ -1046,6 +1048,36 @@ function App() {
             <p style={{ margin: 0, color: COLORS.textMuted }}>
               Ready to go? Approve the draft to send it to your list.
             </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                maxWidth: 360,
+              }}
+            >
+              <label
+                htmlFor="recipient-email"
+                style={{ fontSize: "0.85rem", color: COLORS.textMuted }}
+              >
+                Recipient email (optional)
+              </label>
+              <input
+                id="recipient-email"
+                type="email"
+                value={recipientEmail}
+                onChange={(e) => setRecipientEmail(e.target.value)}
+                placeholder="you@example.com"
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: "14px",
+                  border: `1px solid ${COLORS.border}`,
+                  background: "rgba(12,18,30,0.8)",
+                  color: COLORS.textPrimary,
+                  fontFamily: FONT_FAMILY,
+                }}
+              />
+            </div>
             <button
               type="button"
               onClick={handleSend}
