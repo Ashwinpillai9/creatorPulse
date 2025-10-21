@@ -8,4 +8,5 @@ requests
 beautifulsoup4
 feedparser
 pydantic
+email-validator
 
