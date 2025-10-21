@@ -19,6 +19,130 @@ const COLORS = {
   accentAlt: "#22d3ee",
 };
 
+const htmlToPlain = (html) => {
+  if (!html) return "";
+  if (typeof window !== "undefined" && typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      return (doc.body.textContent || "").trim();
+    } catch (err) {
+      // Fallback to regex stripping below
+    }
+  }
+  return html
+    .replace(/<\/?(script|style|noscript)[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const plainToHtml = (text) => {
+  const escapeHtml = (value) =>
+    (value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const linkify = (value) =>
+    escapeHtml(value).replace(
+      /(https?:\/\/[^\s]+)/g,
+      (match) =>
+        `<a href="${match}" style="color:#2563eb;text-decoration:none;">${match}</a>`
+    );
+
+  const lines = (text || "").split(/\r?\n/);
+  const segments = [];
+  let listBuffer = [];
+
+  const flushList = () => {
+    if (!listBuffer.length) return;
+    segments.push(
+      `<ol style="margin:0 0 18px;padding-left:22px;color:#1f2933;font-size:15px;line-height:1.6;">${listBuffer.join(
+        ""
+      )}</ol>`
+    );
+    listBuffer = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+
+    const listMatch = trimmed.match(/^(\d+)\.\s*(.*)$/);
+    if (listMatch) {
+      const body = linkify(listMatch[2] || "");
+      listBuffer.push(`<li style="margin-bottom:12px;">${body}</li>`);
+      return;
+    }
+
+    flushList();
+
+    if (/^creatorpulse daily$/i.test(trimmed)) {
+      segments.push(
+        '<h2 style="margin:0 0 18px;font-size:22px;color:#0f172a;">CreatorPulse Daily</h2>'
+      );
+      return;
+    }
+
+    if (/^top stories$/i.test(trimmed)) {
+      segments.push(
+        '<h3 style="margin:12px 0 14px;font-size:18px;color:#111827;">Top Stories</h3>'
+      );
+      return;
+    }
+
+    if (trimmed.toLowerCase().startsWith("why it matters")) {
+      const content = linkify(trimmed);
+      segments.push(
+        `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1f2933;"><strong>${content}</strong></p>`
+      );
+      return;
+    }
+
+    const content = linkify(trimmed);
+    segments.push(
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1f2933;">${content}</p>`
+    );
+  });
+
+  flushList();
+
+  const bodyMarkup =
+    segments.join("") ||
+    '<p style="margin:0;font-size:15px;color:#1f2933;">(Draft body removed)</p>';
+
+  return `
+  <div style="background-color:#f5f7fb;padding:24px 0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"
+      style="max-width:640px;margin:0 auto;background-color:#ffffff;border-radius:12px;overflow:hidden;
+      font-family:'Segoe UI',Arial,sans-serif;color:#1f2933;font-size:15px;line-height:1.6;">
+      <tbody>
+        <tr>
+          <td style="background-color:#111827;padding:28px 32px;">
+            <h1 style="margin:0;font-size:24px;color:#ffffff;">CreatorPulse Daily</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            ${bodyMarkup}
+          </td>
+        </tr>
+        <tr>
+          <td style="background-color:#f3f4f6;padding:16px 32px;font-size:12px;color:#6b7280;text-align:center;">
+            You are receiving this update because you follow CreatorPulse.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  `.trim();
+};
+
 const STATUS_TONES = {
   pending: {
     bg: "rgba(148,163,184,0.14)",
@@ -45,37 +169,37 @@ const STATUS_TONES = {
 const STEP_FLOW = [
   {
     key: "source",
-    label: "Step 1",
+    label: "Source Intake",
     title: "Step 1 - Source Intake",
     subtitle: "Choose which sources to include or add a new feed.",
   },
   {
     key: "fetch",
-    label: "Step 2",
+    label: "Fetch Data",
     title: "Step 2 - Fetch Data",
     subtitle: "Pull the latest items from your selected feeds.",
   },
   {
     key: "curate",
-    label: "Step 3",
+    label: "Curate Top 10",
     title: "Step 3 - Curate Top 10",
     subtitle: "Review the stories that made the cut for the briefing.",
   },
   {
     key: "summarize",
-    label: "Step 4",
+    label: "Summaries",
     title: "Step 4 - Summaries",
     subtitle: "Ensure each story has a crisp summary with impact.",
   },
   {
     key: "preview",
-    label: "Step 5",
+    label: "Draft Preview",
     title: "Step 5 - Draft Preview",
     subtitle: "Confirm the HTML newsletter is polished and on-brand.",
   },
   {
     key: "send",
-    label: "Step 6",
+    label: "Send",
     title: "Step 6 - Approval & Send",
     subtitle: "Ship the newsletter once everything looks perfect.",
   },
@@ -119,6 +243,21 @@ const resolveTone = (status) => {
   if (normalized === "error" || normalized === "failed") return "error";
   if (normalized === "skipped") return "pending";
   return "pending";
+};
+
+const statusLabel = (status) => {
+  const normalized = (status || "").toLowerCase();
+  if (normalized === "running" || normalized === "active") return "In progress";
+  if (
+    normalized === "completed" ||
+    normalized === "done" ||
+    normalized === "added" ||
+    normalized === "existing"
+  )
+    return "Done";
+  if (normalized === "error" || normalized === "failed") return "Error";
+  if (normalized === "skipped") return "Skipped";
+  return "Pending";
 };
 
 const metaSummary = (step) => {
@@ -180,12 +319,23 @@ function App() {
   const [stories, setStories] = useState([]);
   const [draftHtml, setDraftHtml] = useState("");
   const [draftText, setDraftText] = useState("");
+  const [editedHtml, setEditedHtml] = useState("");
+  const [editedText, setEditedText] = useState("");
+  const [previewMode, setPreviewMode] = useState("preview");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
   useEffect(() => {
     refreshSources();
   }, []);
+
+  useEffect(() => {
+    const incomingHtml = draftHtml || "";
+    const incomingText = draftText || htmlToPlain(incomingHtml);
+    setEditedHtml(incomingHtml);
+    setEditedText(incomingText);
+    setPreviewMode("preview");
+  }, [draftHtml, draftText]);
 
   const activeKeyComputed = useMemo(
     () => nextActiveKey(pipelineSteps),
@@ -303,8 +453,13 @@ function App() {
       });
 
       setPipelineSteps(updated);
-      setDraftHtml(res.data.html || "");
-      setDraftText(res.data.text || "");
+      const latestHtml = res.data.html || "";
+      const latestText =
+        res.data.text || htmlToPlain(latestHtml);
+      setDraftHtml(latestHtml);
+      setDraftText(latestText);
+      setEditedHtml(latestHtml);
+      setEditedText(latestText);
       setStories(res.data.stories || []);
       if (Array.isArray(res.data.used_source_ids)) {
         setSelectedSourceIds(res.data.used_source_ids);
@@ -343,7 +498,11 @@ function App() {
     setToast("");
     setSendLoading(true);
     try {
-      await sendNewsletter({ source_ids: selectedSourceIds });
+      await sendNewsletter({
+        source_ids: selectedSourceIds,
+        html: editedHtml || draftHtml,
+        text: editedText || draftText,
+      });
       setPipelineSteps((prev) =>
         prev.map((step) =>
           step.key === "send"
@@ -503,8 +662,8 @@ function App() {
     );
   };
 
-  const renderPreview = () => {
-    if (!draftHtml) {
+  const renderPreview = (html) => {
+    if (!html) {
       return (
         <div
           style={{
@@ -529,7 +688,7 @@ function App() {
           maxHeight: "520px",
           overflow: "auto",
         }}
-        dangerouslySetInnerHTML={{ __html: draftHtml }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   };
@@ -712,20 +871,174 @@ function App() {
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
             <p style={{ margin: 0, color: COLORS.textMuted }}>
-              Each summary ends with a “Why it matters” insight to highlight impact.
+              Each summary ends with a '''Why it matters''' insight to highlight impact.
             </p>
             {renderStoriesList(true)}
           </div>
         );
-      case "preview":
+      case "preview": {
+        const currentHtml = editedHtml || draftHtml;
+        const currentText = editedText || draftText;
+        const modeButtonStyle = (mode) => ({
+          padding: "10px 16px",
+          borderRadius: "12px",
+          border: `1px solid ${
+            previewMode === mode ? COLORS.accent : COLORS.border
+          }`,
+          background:
+            previewMode === mode
+              ? "rgba(99,102,241,0.16)"
+              : "rgba(255,255,255,0.04)",
+          color: COLORS.textPrimary,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+        });
+
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
             <p style={{ margin: 0, color: COLORS.textMuted }}>
-              Review the HTML email exactly as subscribers will see it.
+              Review or fine-tune the generated draft before it goes out.
             </p>
-            {renderPreview()}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                alignItems: "center",
+              }}
+            >
+              <button
+                type="button"
+                style={modeButtonStyle("preview")}
+                onClick={() => setPreviewMode("preview")}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                style={modeButtonStyle("html")}
+                onClick={() => setPreviewMode("html")}
+              >
+                Edit HTML
+              </button>
+              <button
+                type="button"
+                style={modeButtonStyle("text")}
+                onClick={() => setPreviewMode("text")}
+              >
+                Edit Text
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const originalHtml = draftHtml || "";
+                  const originalText = draftText || htmlToPlain(originalHtml);
+                  setEditedHtml(originalHtml);
+                  setEditedText(originalText);
+                  setPreviewMode("preview");
+                }}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: "12px",
+                  border: `1px solid ${COLORS.border}`,
+                  background: "rgba(255,255,255,0.04)",
+                  color: COLORS.textMuted,
+                  cursor: "pointer",
+                }}
+              >
+                Reset to generated
+              </button>
+            </div>
+
+            {previewMode === "preview" && renderPreview(currentHtml)}
+
+            {previewMode === "html" && (
+              <textarea
+                value={editedHtml}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setEditedHtml(value);
+                  setEditedText(htmlToPlain(value));
+                }}
+                spellCheck={false}
+                style={{
+                  width: "100%",
+                  minHeight: "260px",
+                  borderRadius: "16px",
+                  border: `1px solid ${COLORS.border}`,
+                  background: "rgba(10,15,28,0.7)",
+                  color: COLORS.textPrimary,
+                  fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+                  fontSize: "0.95rem",
+                  lineHeight: 1.5,
+                  padding: "16px",
+                  boxShadow: "inset 0 12px 24px rgba(2,6,23,0.3)",
+                }}
+              />
+            )}
+
+            {previewMode === "text" && (
+              <textarea
+                value={editedText}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setEditedText(value);
+                  setEditedHtml(plainToHtml(value));
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: "220px",
+                  borderRadius: "16px",
+                  border: `1px solid ${COLORS.border}`,
+                  background: "rgba(10,15,28,0.7)",
+                  color: COLORS.textPrimary,
+                  fontFamily: "'Inter', 'Segoe UI', sans-serif",
+                  fontSize: "0.95rem",
+                  lineHeight: 1.5,
+                  padding: "16px",
+                  boxShadow: "inset 0 12px 24px rgba(2,6,23,0.3)",
+                }}
+              />
+            )}
+
+            {previewMode !== "preview" && (
+              <p style={{ margin: 0, color: COLORS.textMuted, fontSize: "0.85rem" }}>
+                Changes update instantly. Switch back to preview to see the rendered email.
+              </p>
+            )}
+            {previewMode === "text" && (
+              <p style={{ margin: 0, color: COLORS.textMuted, fontSize: "0.85rem" }}>
+                Plain text is sent alongside the HTML for clients that cannot display rich content.
+              </p>
+            )}
+            {previewMode === "preview" && currentText && (
+              <details
+                style={{
+                  marginTop: "8px",
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: "12px",
+                  padding: "12px 16px",
+                  background: "rgba(255,255,255,0.02)",
+                  color: COLORS.textMuted,
+                }}
+              >
+                <summary style={{ cursor: "pointer" }}>Show plain text version</summary>
+                <pre
+                  style={{
+                    marginTop: "10px",
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "'Inter', 'Segoe UI', sans-serif",
+                    color: COLORS.textPrimary,
+                  }}
+                >
+                  {currentText}
+                </pre>
+              </details>
+            )}
           </div>
         );
+      }
       case "send":
       default:
         return (
@@ -736,21 +1049,22 @@ function App() {
             <button
               type="button"
               onClick={handleSend}
-              disabled={!draftHtml || sendLoading}
+              disabled={!(editedHtml || draftHtml) || sendLoading}
               style={{
                 alignSelf: "flex-start",
                 padding: "12px 24px",
                 borderRadius: "16px",
                 border: "none",
                 background:
-                  !draftHtml || sendLoading
+                  !(editedHtml || draftHtml) || sendLoading
                     ? "rgba(99,102,241,0.25)"
                     : `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.accentAlt})`,
                 color: "#0f172a",
                 fontWeight: 700,
-                cursor: !draftHtml || sendLoading ? "not-allowed" : "pointer",
+                cursor:
+                  !(editedHtml || draftHtml) || sendLoading ? "not-allowed" : "pointer",
                 boxShadow:
-                  !draftHtml || sendLoading
+                  !(editedHtml || draftHtml) || sendLoading
                     ? "none"
                     : "0 18px 40px rgba(99,102,241,0.28)",
               }}
@@ -835,6 +1149,10 @@ function App() {
             const tone = STATUS_TONES[toneKey] || STATUS_TONES.pending;
             const isActive = step.key === selectedStepKey;
             const meta = metaSummary(step);
+            let statusText = statusLabel(step.status);
+            if (step.key === "source" && statusText === "Pending" && allSelected) {
+              statusText = "Ready";
+            }
             return (
               <button
                 key={step.key}
@@ -854,17 +1172,7 @@ function App() {
                 onClick={() => setManualStepKey(step.key)}
               >
                 <span>{step.label}</span>
-                <small style={{ fontWeight: 500, opacity: 0.92 }}>
-                  {toneKey === "completed"
-                    ? "Done"
-                    : toneKey === "running"
-                    ? "In progress"
-                    : toneKey === "error"
-                    ? "Needs attention"
-                    : allSelected && step.key === "source"
-                    ? "All sources"
-                    : "Pending"}
-                </small>
+                <small style={{ fontWeight: 500, opacity: 0.92 }}>{statusText}</small>
                 {meta && (
                   <span style={{ fontSize: "0.75rem", opacity: 0.9 }}>{meta}</span>
                 )}
@@ -925,3 +1233,5 @@ function nextActiveKey(steps) {
 }
 
 export default App;
+
+

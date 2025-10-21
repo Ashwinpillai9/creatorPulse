@@ -7,7 +7,12 @@ from typing import Dict, Iterable, Tuple
 import feedparser
 
 from app.core.content_utils import fetch_article_text, strip_markup
-from app.core.llm_utils import summarize_story, normalize_summary
+from app.core.llm_utils import (
+    summarize_story,
+    normalize_summary,
+    summary_is_informative,
+    fallback_summary,
+)
 
 
 def _existing_urls(sb, source_id: int) -> set[str]:
@@ -67,9 +72,30 @@ def ingest_feed(sb, source: Dict) -> Tuple[int, Iterable[Dict]]:
             or entry.get("title", "")
         )
 
-        story = summarize_story(summary_source, entry.get("title", "Untitled"))
-        if not story["summary"]:
-            story["summary"] = normalize_summary(summary_source)
+        title = entry.get("title", "Untitled")
+        story = summarize_story(summary_source, title)
+
+        if not summary_is_informative(story["summary"]):
+            alternate_source = " ".join(
+                filter(
+                    None,
+                    [
+                        title,
+                        strip_markup(raw_summary),
+                        strip_markup(raw_content),
+                        article_text,
+                    ],
+                )
+            )
+            if alternate_source.strip():
+                alt_story = summarize_story(alternate_source, title)
+                if summary_is_informative(alt_story["summary"]):
+                    story = alt_story
+
+        if not summary_is_informative(story["summary"]):
+            story["summary"] = fallback_summary(story["headline"])
+
+        story["summary"] = normalize_summary(story["summary"])
 
         item = {
             "source_id": source_id,

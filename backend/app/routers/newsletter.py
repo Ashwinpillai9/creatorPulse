@@ -10,9 +10,12 @@ from app.core.llm_utils import (
     normalize_summary,
     render_newsletter,
     summarize_story,
+    summary_is_informative,
+    fallback_summary,
 )
 from app.core.schemas import PipelineRequest, SendRequest
 from app.core.supabase_client import get_client
+from app.core.content_utils import strip_markup
 
 router = APIRouter()
 
@@ -31,17 +34,39 @@ def _fetch_top_items(
 
 def _ensure_story_format(item: Dict) -> Dict:
     fallback_title = item.get("title") or "Untitled"
-    summary = item.get("summary") or ""
+    existing_summary = item.get("summary") or ""
 
-    if summary and "why it matters" in summary.lower():
-        item["summary"] = normalize_summary(summary)
-        item["title"] = fallback_title
-        return item
+    if existing_summary:
+        normalized = normalize_summary(existing_summary)
+        if summary_is_informative(normalized):
+            item["summary"] = normalized
+            item["title"] = fallback_title
+            return item
 
-    article_text = item.get("content") or summary or fallback_title
+    article_text = item.get("content") or existing_summary or fallback_title
     story = summarize_story(article_text, fallback_title)
+
+    if not summary_is_informative(story["summary"]):
+        alternate_source = " ".join(
+            filter(
+                None,
+                [
+                    fallback_title,
+                    item.get("content"),
+                    existing_summary,
+                ],
+            )
+        )
+        if alternate_source.strip():
+            alternate_story = summarize_story(alternate_source, fallback_title)
+            if summary_is_informative(alternate_story["summary"]):
+                story = alternate_story
+
+    if not summary_is_informative(story["summary"]):
+        story["summary"] = fallback_summary(story["headline"])
+
     item["title"] = story["headline"]
-    item["summary"] = story["summary"]
+    item["summary"] = normalize_summary(story["summary"])
     return item
 
 
@@ -233,9 +258,35 @@ def run_pipeline(payload: PipelineRequest):
 def send_newsletter(payload: Optional[SendRequest] = Body(default=None)):
     sb = get_client()
     source_ids = payload.source_ids if payload else None
-    newsletter = _build_newsletter(sb, source_ids)
+    html_override = payload.html if payload and payload.html else None
+    text_override = payload.text if payload and payload.text else None
+
+    newsletter = None
+    if html_override is None or text_override is None or source_ids:
+        newsletter = _build_newsletter(sb, source_ids)
+
+    if not newsletter and not html_override:
+        raise HTTPException(
+            status_code=400,
+            detail="No newsletter content available. Run the pipeline first.",
+        )
+
+    if newsletter is None:
+        newsletter = {"html": "", "text": ""}
+
+    html_body = html_override or newsletter.get("html") or ""
+    if not html_body.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Newsletter HTML is empty. Provide edited content or rerun the pipeline.",
+        )
+
+    text_body = text_override or newsletter.get("text") or ""
+    if not text_body.strip():
+        text_body = strip_markup(html_body)
+
     subject = f"CreatorPulse Daily - {datetime.utcnow().date()}"
-    send_email(subject, newsletter["html"], newsletter["text"])
+    send_email(subject, html_body, text_body)
 
     try:
         sb.table("history").insert(

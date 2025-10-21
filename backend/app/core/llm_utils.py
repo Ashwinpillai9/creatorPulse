@@ -74,6 +74,29 @@ def normalize_summary(value: str) -> str:
     return _sanitize_summary(value)
 
 
+def summary_is_informative(value: str) -> bool:
+    text = strip_markup(value or "")
+    if not text:
+        return False
+    words = text.split()
+    if len(words) < 10:
+        return False
+    if "why it matters" not in text.lower():
+        return False
+    placeholders = {"comments", "comment", "read more", "n/a", "na"}
+    if text.strip().lower() in placeholders:
+        return False
+    return True
+
+
+def fallback_summary(title: str) -> str:
+    headline = (title or "This story").strip()
+    return (
+        f"{headline} is developing; for full context, explore the linked source. "
+        "Why it matters: Staying close to the original report keeps you ahead of new updates."
+    )
+
+
 def _parse_headline_summary(raw: str, fallback_title: str) -> Dict[str, str]:
     headline = fallback_title.strip() or "Untitled"
     summary_chunks = []

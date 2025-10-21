@@ -27,3 +27,5 @@ class PipelineRequest(BaseModel):
 
 class SendRequest(BaseModel):
     source_ids: Optional[List[int]] = None
+    html: Optional[str] = None
+    text: Optional[str] = None
